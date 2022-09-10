@@ -1,0 +1,17 @@
+{
+    "github": {
+        "organization": "DTC-Zoomcamp-Projects"
+    },
+    "course": {
+        "name": "ML Zoomcamp",
+        "year": 2022
+    },
+    "project": {
+        "id": 1,
+        "name": "Midterm project"
+    },
+    "airtable": {
+        "database": "app6d97B5yPFKRTI6",
+        "table": "tblSR0BKauZQ2auxl"
+    }
+}

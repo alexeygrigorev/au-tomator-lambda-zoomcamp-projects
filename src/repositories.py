@@ -1,10 +1,10 @@
 import time
-from email.utils import parseaddr as parse_email
+from typing import Dict, Tuple
 
-import boto3
 import requests
 
 import airtable
+import repo_queue
 import namesgenerator
 import config
 
@@ -15,7 +15,7 @@ github_headers = {
 }
 
 
-def generate_random_repo_name():
+def generate_random_repo_name() -> str:
     course = config.course_name
     year = config.course_year
     project = config.project_id
@@ -29,14 +29,14 @@ def generate_random_repo_name():
     return final_repo_name
 
 
-def generate_repo_description():
+def generate_repo_description() -> str:
     course = config.course_name
     year = config.course_year
     project_name = config.project_name
     return f"This is a {project_name} for {course} {year} (TODO: change it)"
 
 
-def create_repo(repo_name: str, private: bool=True):
+def create_repo(repo_name: str, private: bool=True) -> str:
     repo_description = generate_repo_description()
 
     create_repo_request = {
@@ -64,7 +64,29 @@ def create_repo(repo_name: str, private: bool=True):
     return response_json['html_url']
 
 
-def get_commit_sha_main(repo_name: str):
+def make_repository_public(repo_name: str):
+    patch_repo_request = {
+        "private": False,
+    }
+
+    org = config.github_org
+    patch_repo_url = f'https://api.github.com/repos/{org}/{repo_name}'
+
+    patch_repo_response = requests.patch(
+        patch_repo_url,
+        json=patch_repo_request,
+        headers=github_headers,
+    )
+
+    patch_repo_response.raise_for_status()
+
+    response_json = patch_repo_response.json()
+    print(f'{repo_name} is now public')
+
+    return response_json['html_url']
+
+
+def get_commit_sha_main(repo_name: str) -> str:
     org = config.github_org
 
     url = f'https://api.github.com/repos/{org}/{repo_name}/git/refs'
@@ -78,7 +100,7 @@ def get_commit_sha_main(repo_name: str):
     return main_sha
 
 
-def create_branch(repo_name: str, branch_name: str, base_sha: str):
+def create_branch(repo_name: str, branch_name: str, base_sha: str) -> str:
     org = config.github_org
     create_branch_url = f'https://api.github.com/repos/{org}/{repo_name}/git/refs'
 
@@ -102,7 +124,7 @@ def create_branch(repo_name: str, branch_name: str, base_sha: str):
 
 
 def add_collaborator(repo_name: str, collaborator: str,
-        permission: str="admin"):
+        permission: str="admin") -> str:
     org = config.github_org
     add_collaborator_url = f'https://api.github.com/repos/{org}/{repo_name}/collaborators/{collaborator}'
 
@@ -116,6 +138,10 @@ def add_collaborator(repo_name: str, collaborator: str,
         json=add_collaborator_request
     )
     add_collaborator_response.raise_for_status()
+
+    if add_collaborator_response.status_code == 204:
+        print(f'{collaborator} is already a collaborator for {repo_name}')
+        return None
 
     response_json = add_collaborator_response.json()
     invite_url = response_json['html_url']
@@ -141,11 +167,7 @@ def create_pull_request(repo_name: str, target_branch: str):
     return html_url
 
 
-def make_repository_public():
-    pass 
-
-
-def create_random_repo(private=True):
+def create_random_repo(private=True) -> Dict:
     repo_name = generate_random_repo_name()
     repository_url = create_repo(repo_name=repo_name, private=private)
     print(f'repository_url: {repository_url}, sleeping for 5 seconds')
@@ -167,16 +189,7 @@ def create_random_repo(private=True):
         'private': private
     }
 
-    airtable.create_airtable_record(repository, student=None)
-
     return repository
-
-
-
-
-def poll_available_repo_from_queue():
-    # todo
-    return None
 
 
 def ensure_profile_exists(student: str):
@@ -200,29 +213,80 @@ def ensure_profile_exists(student: str):
     return 200, None
 
 
-def assign_repository(student: str, email: str):
-    error_code, error = ensure_profile_exists(student)
+
+def create_private_unassigned_repo():
+    repository = create_random_repo(private=True)
+
+    airtable_record = airtable.create_airtable_record(
+        repository=repository,
+        student=None
+    )
+
+    repository_message = {
+        'airtable_record': airtable_record,
+        'repository': repository
+    }
+
+    return repository_message
+
+
+def create_public_assigned_repo(student):
+    repository = create_random_repo(private=False)
+
+    airtable_record = airtable.create_airtable_record(
+        repository=repository,
+        student=student
+    )
+
+    repository_message = {
+        'airtable_record': airtable_record,
+        'repository': repository
+    }
+
+    return repository_message
+
+
+def assign_repository(github_name: str, email: str) -> Tuple[int, Dict]:
+    error_code, error = ensure_profile_exists(github_name)
     if error_code != 200:
         return error_code, error
 
-    repository = poll_available_repo_from_queue()
-    if repository is not None:
-        # make repository non-private
-        pass
-    else:
-        print(f"don't have an available repository, creating a new one")
-        repository = create_random_repo(private=False)
+    student = {
+        'email': email,
+        'github': github_name
+    }
 
-    invite_link = add_collaborator(
-        repo_name=repository['name'],
-        collaborator=student,
-        permission='admin'
-    )
+    repository_message = repo_queue.poll_available_repo_from_queue()
+
+    if repository_message is not None:
+        repository_name = repository_message['repository']['name']
+        make_repository_public(repository_name)
+
+        invite_link = add_collaborator(
+            repo_name=repository_name,
+            collaborator=github_name,
+            permission='admin'
+        )
+
+        airtable.update_airtable_record(
+            airtable_record=repository_message['airtable_record'],
+            student=student
+        )
+
+    else:
+        print(f"We don't have an available repository, creating a new one")
+        repository_message = create_public_assigned_repo(student)
+        repository_name = repository_message['repository']['name']
+
+        invite_link = add_collaborator(
+            repo_name=repository_name,
+            collaborator=github_name,
+            permission='admin'
+        )
 
     response = {
-        'repository': repository,
+        'repository': repository_message['repository'],
         'invite_link': invite_link
     }
 
-    return 200, response 
-    
+    return 200, response

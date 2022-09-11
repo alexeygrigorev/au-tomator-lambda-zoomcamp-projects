@@ -24,3 +24,7 @@ project_name = project['name']
 airtable = config['airtable']
 airtable_database = airtable['database']
 airtable_table = airtable['table']
+
+queue = config['queue']
+queue_name = queue['name']
+queue_url = queue['url']

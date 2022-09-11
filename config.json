@@ -13,5 +13,9 @@
     "airtable": {
         "database": "app6d97B5yPFKRTI6",
         "table": "tblSR0BKauZQ2auxl"
+    },
+    "queue": {
+        "name": "zoomcamp-projects",
+        "url": "https://sqs.eu-west-1.amazonaws.com/387546586013/zoomcamp-projects"
     }
 }

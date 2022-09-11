@@ -2,3 +2,4 @@ build/
 build.zip
 __pycache__/
 .envrc
+.ipynb_checkpoints/
